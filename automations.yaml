@@ -1,0 +1,40 @@
+- id: '1771521718033'
+  alias: Notify when power is out
+  description: ''
+  triggers:
+  - trigger: numeric_state
+    entity_id:
+    - sensor.cyberpower_ups_input_voltage
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+    below: 60
+  conditions: []
+  actions:
+  - action: notify.notify
+    metadata: {}
+    data:
+      title: Power is out
+      message: East Bay Makers Club power went out
+  mode: single
+- id: '1771522138809'
+  alias: Notify when power is back
+  description: ''
+  triggers:
+  - trigger: numeric_state
+    entity_id:
+    - sensor.cyberpower_ups_input_voltage
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+    above: 115
+  conditions: []
+  actions:
+  - action: notify.notify
+    metadata: {}
+    data:
+      title: Power is back
+      message: East Bay Makers Club power came back
+  mode: single

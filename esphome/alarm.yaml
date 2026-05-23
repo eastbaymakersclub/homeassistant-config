@@ -1,0 +1,409 @@
+substitutions:
+  name: "adtalarm"
+  friendly_name: "ADT Alarm"
+  panelId: "AdtAlarm"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+    version: recommended
+
+packages:
+  common: !include common/common.yaml
+
+ota:
+  - id: !extend common_ota
+    on_begin:
+      switch.turn_off: connection_status_switch
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  custom_services: true
+
+external_components:
+  - source: github://Dilbert66/esphome-components@main #uncomment to use github repository. Main branch selected
+  #- source:  my_components #uncomment to use local directory
+    components: [vista_alarm_panel,mg_lib]
+    refresh: 10min
+
+interval:
+  - interval: 120min
+    then:
+      - lambda: |-
+          $panelId->set_panel_time();
+
+vista_alarm_panel:
+  id: $panelId
+  accesscode: !secret alarm_access_code #Only comes into effect if needed for arming and quickarm is not set
+  maxzones: "48" #maximum amount of zones that your panel supports
+  maxpartitions: "1" #maximum amount of partitions that your panel supports
+
+  # Enroll your RF serial devices here. Format: serial#:loop#:zone#  Each record is comma separated.
+  # For most devices loop1 is used such as 5800pir, other devices such as 5816 will use loop2.  Please refer to your
+  # RF device programming (*56 program) to see what loop and zones are assigned to your RF devices.
+  # You can refer to the pdf link below for more details on loop numbers
+  # https://advancedsecurityllc.com/wp-content/uploads/5800%20Wireless%20Device%20List.pdf
+  #
+  # Note: These entries are used to identify and report immediate open/close/battery
+  # activities directly from your RF devices, bypassing the panel. This is beneficial
+  # since the panel only reports open events to the keypads. The firmware will work fine
+  # without these entries except you will have a delay of TTL milliseconds before
+  # the report of closed zones.
+
+  rfseriallookup: "684310:1:10,1015040:1:11,0241546:1:12,0542311:1:13" # serial1:loop#:zone1,serial2:loop#:zone2
+
+  defaultpartition: "1" #set to your main partition
+  vistadebuglevel: "3" #component debug level for messages
+
+  #Assign a new virtual keypad address to each active partition using programs *190 - *196
+  #and enter it below.  For unused partitions, use 0 as the keypad address below.
+  keypadaddr1: "17" #partition 1 virtual keyapd
+  keypadaddr2: "0" #partition 2 virtual keypad. set to 0 to disable
+  keypadaddr3: "0" #partition 3 virtual keypad. set to 0 to disable
+
+  #AUI address from program field *189 to use for zone status queries (open/close and bypass).
+  #Ensure it is not assigned to a real keypad or to Total Connect 2.0. For those panels, you can select auiaddr: 5 or 6.
+  #As a final option, you can assign it to the same address as your existing AUI display address of 1
+  #Note: Older vista20 panels only have addresses 1 and 2 while newer will have 1,2,5 and 6. For Vista128,Vista250 commercial panels, ensure the address used is setup as an AUI keypad in program #93, device programming
+
+  auiaddr: "0" #use auiaddr: 5 or 6 if you already have address 2 assigned to Total Connect or another keypad. Defaults to 0 - disabled
+
+  ##esp32
+  # rxpin: "22" #GPIO pin to use for data receive (yellow line)
+  # txpin: "21" #GPIO pin to use for data transmit (green line)
+  # monitorpin: "18" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+  rxpin: "18" #GPIO pin to use for data receive (yellow line)
+  txpin: "21" #GPIO pin to use for data transmit (green line)
+  monitorpin: "22" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+
+  #input mode control
+  invert_mon: "true"
+  invert_rx: "true"
+  invert_tx: "true"
+  input_mode_rx: INPUT
+  input_mode_mon: INPUT
+
+  ##esp8266
+  #rxpin: "5" #GPIO pin to use for data receive (yellow line)
+  #txpin: "4" #GPIO pin to use for data transmit (green line)
+  #monitorpin: "14" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+
+  ##rp2040
+  #rxpin: "21" #GPIO pin to use for data receive (yellow line)
+  #txpin: "20" #GPIO pin to use for data transmit (green line)
+  #monitorpin: "18" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+
+  #note for the vista128 and vista250, the expanderaddr and relayaddr addresses must be 0
+  # module addresses:
+  # 07 4229 zone expander  zones 9-16
+  # 08 4229 zone expander zones 17-24
+  # 09 4229 zone expander zones 25-32
+  # 10 4229 zone expander zones 33-40
+  # 11 4229 zone expander zones 41 48
+  # 12 4204 relay module
+  # 13 4204 relay module
+  # 14 4204 relay module
+  # 15 4204 relay module
+
+  expanderaddr1: "0" # 1st zone expander emulator (4229) address to use . Set to 0 to disable.
+  expanderaddr2: "0" # 2nd expander emulator address to use . Set to 0 to disable.
+
+  relayaddr1: "0" # relay module emulation (4204) addresses. Set to 0 to disable
+  relayaddr2: "0"
+  relayaddr3: "0"
+  relayaddr4: "0"
+
+  ttl: "30000"  # time  to live  in ms for zone/fire status before expiring;
+  quickarm: "false"
+  lrrsupervisor: "true" # set to true if we don't have an LRR monitoring supervisor  we can emulate one to get the statuses
+
+  #enable use of second esp32 core for async polling of panel data. default: true
+  # set to false if you get watchdog errors
+  use_async_polling: true
+
+  clean_build: "false" #default is false.  only set to true if getting duplication errors in linking step. Once you compile, reset it back to false.
+
+########################################################################
+# Edit binary and text sensors below to suit your alarm setup.
+# You can safely add or remove any sensor as needed.
+# The id code is entered using the "id:" tag.  Alternatively you can
+# add the id code in round brackets  at the end of the sensor name: eg. (z1)
+binary_sensor:
+
+### zone sensors ###
+# open/close status for each zone
+# zone id code = z+zone number
+  - platform: vista_alarm_panel
+    id: z1
+    name: "Front Door Left"
+    device_class: door
+
+  - platform: vista_alarm_panel
+    id: z2
+    name: "Front Door Center"
+    device_class: door
+
+  - platform: vista_alarm_panel
+    name: "Front Door Right"
+    id: z3
+    device_class: door
+
+  - platform: vista_alarm_panel
+    id: z4
+    name: "Back Door"
+    device_class: door
+
+  - platform: vista_alarm_panel
+    id: z5
+    name: "Mystery Sensor"
+    device_class: door
+
+  - platform: vista_alarm_panel
+    id: z6
+    name: "Front Left Motion Sensor"
+    device_class: motion
+
+  - platform: vista_alarm_panel
+    id: z7
+    name: "Front Center Motion Sensor"
+    device_class: motion
+
+  - platform: vista_alarm_panel
+    id: z10
+    name: "Arcade Motion Sensor"
+    device_class: motion
+
+  # Busted: Stays in CK:11 state so is now disabled
+  # - platform: vista_alarm_panel
+  #   id: z11
+  #   name: "Left Glass Break Sensor"
+  #   device_class: problem
+
+  - platform: vista_alarm_panel
+    id: z12
+    name: "Right Glass Break Sensor"
+    device_class: problem
+
+  - platform: vista_alarm_panel
+    id: z13
+    name: "Back Wall Motion Sensor"
+    device_class: motion
+
+# you can also add fields to show fault statuses of other devices you have.  The id will be 1 + device address.
+
+# #relay addresses are 12/13/14/15
+#   - platform: vista_alarm_panel
+#     id: z112
+#     name: "check relay 12"
+#     device_class: problem
+
+# #zone expander device addresses are 07/08/09/10/11
+#   - platform: vista_alarm_panel
+#     id: z108
+#     name: "check expander 08"
+#     device_class: problem
+
+# #comm device address such as Alarmnet/LRR is 03
+#   - platform: vista_alarm_panel
+#     id: z103
+#     name: "check comm device"
+#     device_class: problem
+
+### non zone sensors ###
+
+# partition ready status
+# ready id code = rdy_ + partition number
+  - platform: vista_alarm_panel
+    id: rdy_1
+    name: "Ready"
+
+# partition/panel trouble status
+# trouble id code = trbl_ + partition number
+  - platform: vista_alarm_panel
+    id: trbl_1
+    name: "Trouble "
+    device_class: problem
+
+# bypass zones active status
+# bypass id code = byp_ + partition number
+  - platform: vista_alarm_panel
+    id: byp_1
+    name: "Bypass"
+
+# armed away status
+# armed away id code = arma_ + partition number
+  - platform: vista_alarm_panel
+    id: arma_1
+    name: "Away"
+
+# armed status
+# armed id code = arm_ + partition number
+  - platform: vista_alarm_panel
+    id: arm_1
+    name: "Armed"
+
+# armed stay status
+# armed stay id code = arms_ + partition number
+  - platform: vista_alarm_panel
+    id: arms_1
+    name: "Stay"
+
+# armed instant status
+# armed instant id code = armi_ + partition number
+  - platform: vista_alarm_panel
+    id: armi_1
+    name: "Instant"
+
+# armed night status
+# armed night id code = armn_ + partition number
+  - platform: vista_alarm_panel
+    id: armn_1
+    name: "Night"
+
+# ac status
+# ac id code = (ac)
+  - platform: vista_alarm_panel
+    id: ac
+    name: "AC Status"
+    device_class: plug
+
+# chime status
+# chime id code = chm_ + partition number
+  - platform: vista_alarm_panel
+    id: chm_1
+    name: "Chime"
+
+# alarm status
+# alarm id code = alm_ + partition number
+  - platform: vista_alarm_panel
+    id: alm_1
+    name: "Alarm"
+
+# battery status
+# battery id code = bat
+  - platform: vista_alarm_panel
+    id: bat
+    name: "Battery Status"
+    device_class: problem
+
+# fire alarm status
+# fire alarm id code = fire_ + partition number
+  - platform: vista_alarm_panel
+    id: fire_1
+    name: "Fire"
+    device_class: smoke
+
+# relay status
+# relay id code = r + address + channel
+  # - platform: vista_alarm_panel
+  #   id: r121
+  #   name: "Relay1"
+
+  # - platform: vista_alarm_panel
+  #   id: r122
+  #   name: "Relay2"
+
+#### text sensors ####
+text_sensor:
+
+#alternative zone status as a text sensor. Values:  O=open, B=bypass,T=trbl or check,A=alarm
+# zone id code = z+zone number
+  # - platform: vista_alarm_panel
+  #   name: "Front door zone z1"
+  #   id: z1s messages
+
+# system status messages
+# system status id code = ss_ + partition number
+  - platform: vista_alarm_panel
+    id: ss_1
+    name: "System Status"
+    icon: "mdi:shield"
+# sample filter to change "not_ready" status to "disarmed" for use in HA Alarm Panel
+    filters:
+     - lambda: |-
+         if (x == "not_ready") x="disarmed";
+         return x;
+
+# long range radio messages
+# lrr id code = lrr
+  - platform: vista_alarm_panel
+    id: lrr
+    name: "Lrr Msg"
+    icon: "mdi:alert-box"
+
+# RF zone messages
+# RF id code = rf
+  - platform: vista_alarm_panel
+    id: rf
+    name: "RF Msg"
+    icon: "mdi:alert-box"
+
+# virtual lcd keypad line1 and line2 messages for each partition
+# partition line1 id code = ln1_ + partition number
+# partition line2 id code = ln2_ + partition number
+# partition 1
+  - platform: vista_alarm_panel
+    name: "Line1"
+    id: ln1_1
+  - platform: vista_alarm_panel
+    name: "Line2"
+    id: ln2_1
+
+# zone status messages bypas/open/alarm
+# zone status id code = zs
+  - platform: vista_alarm_panel
+    name: "Zone Status"
+    id: zs
+
+# system beeps
+# beeps id code = bp_ + partition number
+  - platform: vista_alarm_panel
+    name: "Beeps"
+    id: bp_1
+
+#optional cmd button example.  Send any keypad keys
+#button:
+#    - platform: template
+#      name: Gate Button
+#      id: gate1
+#      icon: "mdi:emoticon-outline"
+#      on_press:
+#        - lambda: |-
+#            $panelId->alarm_keypress_partition("${accesscode}#701",1);
+
+
+ #- platform: gpio  #example use of pin d8 as a zone trigger port for the emulated zone expander
+  #  pin: D8
+  #  id: pind8
+  #  device_class: window
+   # on_press:       #zone,on/off
+   #   - lambda: |-
+   #       $panelId->setZoneFault(17,1);
+  #  on_release:
+  #    - lambda: |-
+   #       $panelId->setZoneFault(17,0);
+
+ # end of panel sensor setup - no need to edit anything below.
+##############################################################################
+switch:
+  - platform: template
+    name: "$name Connection"
+    id: connection_status_switch
+    restore_mode: DISABLED
+    optimistic: true
+    lambda: |-
+      return $panelId->connected();
+    icon: "mdi:shield-link-variant"
+    turn_on_action:
+      - switch.toggle: restart_switch
+    turn_off_action:
+      - lambda: |-
+         $panelId->stop();
+  - platform: restart
+    id: restart_switch

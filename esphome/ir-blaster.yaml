@@ -1,0 +1,50 @@
+esphome:
+  name: ir-blaster
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+packages:
+  common: !include common/common.yaml
+
+api:
+  services:
+    - service: transmit_panasonic
+      variables:
+        address: int
+        command: int
+      then:
+        - remote_transmitter.transmit_panasonic:
+            address: !lambda 'return address;'
+            command: !lambda 'return command;'
+    - service: transmit_nec
+      variables:
+        address: int
+        command: int
+      then:
+        - remote_transmitter.transmit_nec:
+            address: !lambda 'return address;'
+            command: !lambda 'return command;'
+
+remote_transmitter:
+  non_blocking: true
+  pin:
+    number: 13
+    mode:
+      output: true
+  carrier_duty_percent: 50%
+
+remote_receiver:
+  id: my_receiver
+  pin:
+    number: 21
+    inverted: true
+  dump: all
+
+climate:
+  - platform: toshiba
+    name: "Bryant Mini Split"
+    model: RAC-PT1411HWRU-F
+    receiver_id: my_receiver

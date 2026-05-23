@@ -1,0 +1,27 @@
+.DS_Store
+
+# Home Assistant runtime/private state
+secrets.yaml
+.cloud/
+.storage/
+.cache/
+.ha_run.lock
+deps/
+tts/
+image/
+media/
+backups/
+*.db
+*.db-*
+*.log
+*.log.*
+*.lock
+
+# Downloaded/generated integrations and Python cache
+custom_components/hacs/
+__pycache__/
+*.py[cod]
+
+# ESPHome runtime/private state
+esphome/.esphome/
+esphome/secrets.yaml

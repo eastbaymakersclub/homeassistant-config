@@ -1,0 +1,31 @@
+
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+template:
+  - alarm_control_panel:
+      - name: "ADT Alarm"
+        state: "{{ states('sensor.adt_alarm_system_status') }}"
+        code_arm_required: false
+        arm_away:
+          action: esphome.adtalarm_alarm_arm_away
+          data_template:
+            partition: 1
+        disarm:
+          action: esphome.adtalarm_alarm_disarm
+          data_template:
+            code: '{{code}}'
+            partition: 1
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.30.33.0/24
