@@ -1,0 +1,146 @@
+substitutions:
+  name: album-tag-reader
+  friendly_name: "Album Tag Reader"
+  album_cards_base_url: "http://192.168.67.2:8099"
+  pn532_sda_pin: "21"
+  pn532_scl_pin: "22"
+  activity_led_pin: "2"
+  boot_button_pin: "0"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+packages:
+  common: !include common/common.yaml
+
+i2c:
+  sda: ${pn532_sda_pin}
+  scl: ${pn532_scl_pin}
+  scan: true
+
+http_request:
+  timeout: 5s
+  buffer_size_rx: 2048
+  buffer_size_tx: 1024
+
+output:
+  - platform: gpio
+    id: activity_led_output
+    pin: ${activity_led_pin}
+
+light:
+  - platform: binary
+    id: activity_led
+    name: "Activity LED"
+    output: activity_led_output
+    restore_mode: ALWAYS_OFF
+
+pn532_i2c:
+  id: pn532_board
+  update_interval: 750ms
+  on_tag:
+    then:
+      - light.turn_on: activity_led
+      - text_sensor.template.publish:
+          id: last_tag_uid
+          state: !lambda "return x;"
+      - http_request.post:
+          url: ${album_cards_base_url}/api/hardware/tag-scans
+          request_headers:
+            Content-Type: application/json
+          capture_response: true
+          max_response_buffer_size: 512
+          json: |-
+            root["device"] = "${name}";
+            root["tagUid"] = x;
+
+            if (!tag.has_ndef_message()) {
+              id(last_tag_url).publish_state("");
+              return;
+            }
+
+            auto message = tag.get_ndef_message();
+            auto records = message->get_records();
+            for (auto &record : records) {
+              std::string payload = record->get_payload();
+              size_t url_start = payload.find("https://");
+              if (url_start == std::string::npos) {
+                url_start = payload.find("http://");
+              }
+              if (url_start != std::string::npos) {
+                std::string tag_url = payload.substr(url_start);
+                root["tagUrl"] = tag_url;
+                id(last_tag_url).publish_state(tag_url);
+                return;
+              }
+            }
+
+            id(last_tag_url).publish_state("");
+          on_response:
+            then:
+              - lambda: |-
+                  if (response->status_code == 200) {
+                    id(reader_status).publish_state("Played album");
+                  } else if (response->status_code == 404) {
+                    id(reader_status).publish_state("Unknown album tag");
+                  } else {
+                    id(reader_status).publish_state("Playback request failed");
+                  }
+              - light.turn_off: activity_led
+          on_error:
+            then:
+              - text_sensor.template.publish:
+                  id: reader_status
+                  state: "Album Cards API unreachable"
+              - light.turn_off: activity_led
+  on_tag_removed:
+    then:
+      - text_sensor.template.publish:
+          id: reader_status
+          state: "Idle"
+
+binary_sensor:
+  - platform: gpio
+    name: "Action Button"
+    pin:
+      number: ${boot_button_pin}
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    on_press:
+      then:
+        - text_sensor.template.publish:
+            id: reader_status
+            state: "Idle"
+        - text_sensor.template.publish:
+            id: last_tag_uid
+            state: ""
+        - text_sensor.template.publish:
+            id: last_tag_url
+            state: ""
+
+text_sensor:
+  - platform: template
+    name: "Last Tag UID"
+    id: last_tag_uid
+    icon: mdi:nfc
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Last Tag URL"
+    id: last_tag_url
+    icon: mdi:link
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Reader Status"
+    id: reader_status
+    icon: mdi:album
+    entity_category: diagnostic
