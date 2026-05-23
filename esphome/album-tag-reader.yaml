@@ -2,17 +2,16 @@ substitutions:
   name: album-tag-reader
   friendly_name: "Album Tag Reader"
   album_cards_base_url: "http://192.168.67.2:8099"
-  pn532_sda_pin: "21"
+  pn532_sda_pin: "23"
   pn532_scl_pin: "22"
-  activity_led_pin: "2"
-  boot_button_pin: "0"
+  activity_led_pin: "13"
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
 
 esp32:
-  board: esp32dev
+  board: featheresp32
   framework:
     type: esp-idf
 
@@ -105,15 +104,11 @@ pn532_i2c:
           id: reader_status
           state: "Idle"
 
-binary_sensor:
-  - platform: gpio
-    name: "Action Button"
-    pin:
-      number: ${boot_button_pin}
-      mode:
-        input: true
-        pullup: true
-      inverted: true
+button:
+  - platform: template
+    name: "Clear Status"
+    icon: mdi:broom
+    entity_category: config
     on_press:
       then:
         - text_sensor.template.publish:
