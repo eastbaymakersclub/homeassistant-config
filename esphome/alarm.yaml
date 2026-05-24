@@ -58,6 +58,19 @@ vista_alarm_panel:
 
   rfseriallookup: "684310:1:10,1015040:1:11,0241546:1:12,0542311:1:13" # serial1:loop#:zone1,serial2:loop#:zone2
 
+  # Observed RF monitor events from the live host config before cleanup.
+  # These look like raw serial/status observations, not confirmed zone mappings.
+  # 542311,00 seemed to be the event for the front left motion sensor
+  # 684310,00 arcade motion sensor?
+  # 1015040,40
+  # 467896,04
+  # 301761,84
+  # 996055,04
+  # 467890,04
+  # 467887,04
+  # 996054,04
+  # 575763,84
+
   defaultpartition: "1" #set to your main partition
   vistadebuglevel: "3" #component debug level for messages
 
