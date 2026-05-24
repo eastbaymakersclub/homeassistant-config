@@ -56,20 +56,7 @@ vista_alarm_panel:
   # without these entries except you will have a delay of TTL milliseconds before
   # the report of closed zones.
 
-  rfseriallookup: "542311:1:16,684310:1:17,1015040:1:18,467896:1:19" # serial1:loop#:zone1,serial2:loop#:zone2
-
-#RF Serial Lookup Notes:
-# 542311,00 seemed to be the event for the front left motion sensor
-# 684310,00 arcade motion sensor?
-# 1015040,40
-# 467896,04
-# 301761,84
-# 996055,04
-# 467890,04
-# 467887,04
-# 467896,04
-# 996054,04
-# 575763,84
+  rfseriallookup: "684310:1:10,1015040:1:11,0241546:1:12,0542311:1:13" # serial1:loop#:zone1,serial2:loop#:zone2
 
   defaultpartition: "1" #set to your main partition
   vistadebuglevel: "3" #component debug level for messages
@@ -134,7 +121,7 @@ vista_alarm_panel:
 
   ttl: "30000"  # time  to live  in ms for zone/fire status before expiring;
   quickarm: "false"
-  lrrsupervisor: "false" # set to true if we don't have an LRR monitoring supervisor  we can emulate one to get the statuses
+  lrrsupervisor: "true" # set to true if we don't have an LRR monitoring supervisor  we can emulate one to get the statuses
 
   #enable use of second esp32 core for async polling of panel data. default: true
   # set to false if you get watchdog errors
@@ -174,33 +161,39 @@ binary_sensor:
 
   - platform: vista_alarm_panel
     id: z5
-    name: "Unknown Sensor"
+    name: "Mystery Sensor"
     device_class: door
 
   - platform: vista_alarm_panel
     id: z6
-    name: "Motion Sensor 1 (Wired)"
+    name: "Front Left Motion Sensor"
     device_class: motion
 
   - platform: vista_alarm_panel
     id: z7
-    name: "Motion Sensor 2 (Wired)"
+    name: "Front Center Motion Sensor"
     device_class: motion
 
   - platform: vista_alarm_panel
     id: z10
-    name: "Motion Sensor 3 (Wireless)"
+    name: "Arcade Motion Sensor"
     device_class: motion
 
-  - platform: vista_alarm_panel
-    id: z11
-    name: "Front Right Glass Break Sensor"
-    device_class: problem
+  # Busted: Stays in CK:11 state so is now disabled
+  # - platform: vista_alarm_panel
+  #   id: z11
+  #   name: "Left Glass Break Sensor"
+  #   device_class: problem
 
   - platform: vista_alarm_panel
     id: z12
-    name: "Glass Break Sensor?"
+    name: "Right Glass Break Sensor"
     device_class: problem
+
+  - platform: vista_alarm_panel
+    id: z13
+    name: "Back Wall Motion Sensor"
+    device_class: motion
 
 # you can also add fields to show fault statuses of other devices you have.  The id will be 1 + device address.
 
@@ -308,9 +301,9 @@ binary_sensor:
 
 # relay status
 # relay id code = r + address + channel
-  - platform: vista_alarm_panel
-    id: r121
-    name: "Relay1"
+  # - platform: vista_alarm_panel
+  #   id: r121
+  #   name: "Relay1"
 
   # - platform: vista_alarm_panel
   #   id: r122
