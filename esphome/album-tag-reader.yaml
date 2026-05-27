@@ -47,7 +47,7 @@ globals:
     restore_value: no
     initial_value: '""'
 
-  - id: last_played_tag_uid
+  - id: last_played_tag_key
     type: std::string
     restore_value: no
     initial_value: '""'
@@ -101,6 +101,7 @@ pn532_i2c:
           id(last_tag_uid).publish_state(x);
 
           if (!tag.has_ndef_message()) {
+            ESP_LOGI("album_tag_reader", "Read tag %s without an NDEF message", x.c_str());
             id(last_tag_url).publish_state("");
             return;
           }
@@ -115,17 +116,20 @@ pn532_i2c:
             }
             if (url_start != std::string::npos) {
               id(current_tag_url) = payload.substr(url_start);
+              ESP_LOGI("album_tag_reader", "Read tag %s URL %s", x.c_str(), id(current_tag_url).c_str());
               id(last_tag_url).publish_state(id(current_tag_url));
               return;
             }
           }
 
+          ESP_LOGI("album_tag_reader", "Read tag %s without an album URL", x.c_str());
           id(last_tag_url).publish_state("");
       - if:
           condition:
             lambda: |-
+              std::string tag_key = x + "|" + id(current_tag_url);
               return !id(current_tag_url).empty() &&
-                (id(last_played_tag_uid) != x || millis() - id(last_played_at) > ${same_tag_cooldown_ms});
+                (id(last_played_tag_key) != tag_key || millis() - id(last_played_at) > ${same_tag_cooldown_ms});
           then:
             - http_request.post:
                 url: ${album_cards_base_url}/api/hardware/tag-scans
@@ -144,7 +148,7 @@ pn532_i2c:
                     - lambda: |-
                         if (response->status_code == 200) {
                           id(reader_status).publish_state("Played album");
-                          id(last_played_tag_uid) = x;
+                          id(last_played_tag_key) = x + "|" + id(current_tag_url);
                           id(last_played_at) = millis();
                           id(blink_play_success).execute();
                         } else if (response->status_code == 404) {
@@ -166,6 +170,7 @@ pn532_i2c:
                   id(reader_status).publish_state("No album URL on tag");
                   id(blink_reader_error).execute();
                 } else {
+                  ESP_LOGI("album_tag_reader", "Skipped recently played tag %s URL %s", x.c_str(), id(current_tag_url).c_str());
                   id(reader_status).publish_state("Tag already played");
                   id(blink_reader_info).execute();
                 }
