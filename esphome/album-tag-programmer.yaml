@@ -57,7 +57,7 @@ globals:
     initial_value: '""'
 
 script:
-  - id: write_pending_tag
+  - id: arm_pending_tag_write
     mode: restart
     then:
       - if:
@@ -68,9 +68,74 @@ script:
                 auto message = new nfc::NdefMessage();
                 message->add_uri_record(id(pending_tag_url));
                 id(pn532_board).write_mode(message);
-            - wait_until:
-                not:
-                  pn532.is_writing:
+            - text_sensor.template.publish:
+                id: writer_status
+                state: "Ready to write album tag"
+          else:
+            - light.turn_off: activity_led
+
+interval:
+  - interval: 2s
+    then:
+      - if:
+          condition:
+            lambda: "return id(pending_tag_job_id).empty();"
+          then:
+            - http_request.get:
+                url: ${album_cards_base_url}/api/hardware/tag-writes/next
+                capture_response: true
+                max_response_buffer_size: 1024
+                on_response:
+                  then:
+                    - lambda: |-
+                        id(pending_tag_job_id).clear();
+                        id(pending_tag_url).clear();
+
+                        if (response->status_code != 200) {
+                          id(writer_status).publish_state("Could not fetch queued tag");
+                          return;
+                        }
+
+                        bool parsed = json::parse_json(body, [](JsonObject root) -> bool {
+                          JsonObject job = root["job"];
+                          if (job.isNull()) {
+                            return true;
+                          }
+
+                          const char *job_id = job["id"] | "";
+                          const char *tag_url = job["tagUrl"] | "";
+                          if (strlen(job_id) == 0 || strlen(tag_url) == 0) {
+                            id(writer_status).publish_state("Queued tag response was incomplete");
+                            return false;
+                          }
+
+                          id(pending_tag_job_id) = job_id;
+                          id(pending_tag_url) = tag_url;
+                          id(pending_url_sensor).publish_state(tag_url);
+                          id(writer_status).publish_state("Queued tag ready; place NFC tag");
+                          return true;
+                        });
+
+                        if (!parsed) {
+                          id(writer_status).publish_state("Could not parse queued tag");
+                        }
+                    - script.execute: arm_pending_tag_write
+                on_error:
+                  then:
+                    - text_sensor.template.publish:
+                        id: writer_status
+                        state: "Album Cards API unreachable"
+                    - light.turn_off: activity_led
+
+pn532_i2c:
+  id: pn532_board
+  update_interval: 750ms
+  on_finished_write:
+    then:
+      - if:
+          condition:
+            lambda: "return !id(pending_tag_job_id).empty();"
+          then:
             - http_request.post:
                 url: !lambda |-
                   return std::string("${album_cards_base_url}/api/hardware/tag-writes/") + id(pending_tag_job_id) + "/complete";
@@ -80,7 +145,9 @@ script:
                 max_response_buffer_size: 512
                 json: |-
                   root["ok"] = true;
-                  root["tagUid"] = id(current_tag_uid);
+                  if (!id(current_tag_uid).empty()) {
+                    root["tagUid"] = id(current_tag_uid);
+                  }
                 on_response:
                   then:
                     - lambda: |-
@@ -99,65 +166,17 @@ script:
                         id: writer_status
                         state: "Could not confirm tag write"
                     - light.turn_off: activity_led
-          else:
-            - light.turn_off: activity_led
-
-pn532_i2c:
-  id: pn532_board
-  update_interval: 750ms
   on_tag:
     then:
       - light.turn_on: activity_led
       - lambda: |-
           id(current_tag_uid) = x;
           id(last_tag_uid).publish_state(x);
-          id(writer_status).publish_state("Checking queued album tag");
-      - http_request.get:
-          url: ${album_cards_base_url}/api/hardware/tag-writes/next
-          capture_response: true
-          max_response_buffer_size: 1024
-          on_response:
-            then:
-              - lambda: |-
-                  id(pending_tag_job_id).clear();
-                  id(pending_tag_url).clear();
-
-                  if (response->status_code != 200) {
-                    id(writer_status).publish_state("Could not fetch queued tag");
-                    return;
-                  }
-
-                  bool parsed = json::parse_json(body, [](JsonObject root) -> bool {
-                    JsonObject job = root["job"];
-                    if (job.isNull()) {
-                      id(writer_status).publish_state("No queued album tag");
-                      return true;
-                    }
-
-                    const char *job_id = job["id"] | "";
-                    const char *tag_url = job["tagUrl"] | "";
-                    if (strlen(job_id) == 0 || strlen(tag_url) == 0) {
-                      id(writer_status).publish_state("Queued tag response was incomplete");
-                      return false;
-                    }
-
-                    id(pending_tag_job_id) = job_id;
-                    id(pending_tag_url) = tag_url;
-                    id(pending_url_sensor).publish_state(tag_url);
-                    id(writer_status).publish_state("Writing album tag");
-                    return true;
-                  });
-
-                  if (!parsed) {
-                    id(writer_status).publish_state("Could not parse queued tag");
-                  }
-              - script.execute: write_pending_tag
-          on_error:
-            then:
-              - text_sensor.template.publish:
-                  id: writer_status
-                  state: "Album Cards API unreachable"
-              - light.turn_off: activity_led
+          if (id(pending_tag_job_id).empty()) {
+            id(writer_status).publish_state("Saw tag; no queued album tag");
+          }
+      - delay: 500ms
+      - light.turn_off: activity_led
 
 button:
   - platform: template
@@ -169,6 +188,7 @@ button:
         - lambda: |-
             id(pending_tag_job_id).clear();
             id(pending_tag_url).clear();
+            id(pn532_board).read_mode();
         - text_sensor.template.publish:
             id: writer_status
             state: "Cleared local pending tag"
