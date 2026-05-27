@@ -180,6 +180,7 @@ pn532_i2c:
                 max_response_buffer_size: 512
                 json: |-
                   root["ok"] = true;
+                  root["tagUrl"] = id(pending_tag_url);
                   if (!id(current_tag_uid).empty()) {
                     root["tagUid"] = id(current_tag_uid);
                   }
