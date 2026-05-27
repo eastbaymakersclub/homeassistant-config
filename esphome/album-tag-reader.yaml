@@ -57,12 +57,45 @@ globals:
     restore_value: no
     initial_value: "0"
 
+script:
+  - id: blink_tag_detected
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 80ms
+      - light.turn_off: activity_led
+
+  - id: blink_play_success
+    mode: restart
+    then:
+      - repeat:
+          count: 2
+          then:
+            - light.turn_on: activity_led
+            - delay: 120ms
+            - light.turn_off: activity_led
+            - delay: 120ms
+
+  - id: blink_reader_error
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 900ms
+      - light.turn_off: activity_led
+
+  - id: blink_reader_info
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 250ms
+      - light.turn_off: activity_led
+
 pn532_i2c:
   id: pn532_board
   update_interval: 750ms
   on_tag:
     then:
-      - light.turn_on: activity_led
+      - script.execute: blink_tag_detected
       - lambda: |-
           id(current_tag_url).clear();
           id(last_tag_uid).publish_state(x);
@@ -113,27 +146,29 @@ pn532_i2c:
                           id(reader_status).publish_state("Played album");
                           id(last_played_tag_uid) = x;
                           id(last_played_at) = millis();
+                          id(blink_play_success).execute();
                         } else if (response->status_code == 404) {
                           id(reader_status).publish_state("Unknown album tag");
+                          id(blink_reader_error).execute();
                         } else {
                           id(reader_status).publish_state("Playback request failed");
+                          id(blink_reader_error).execute();
                         }
-                    - light.turn_off: activity_led
                 on_error:
                   then:
                     - text_sensor.template.publish:
                         id: reader_status
                         state: "Album Cards API unreachable"
-                    - light.turn_off: activity_led
+                    - script.execute: blink_reader_error
           else:
             - lambda: |-
                 if (id(current_tag_url).empty()) {
                   id(reader_status).publish_state("No album URL on tag");
+                  id(blink_reader_error).execute();
                 } else {
                   id(reader_status).publish_state("Tag already played");
+                  id(blink_reader_info).execute();
                 }
-            - delay: 500ms
-            - light.turn_off: activity_led
   on_tag_removed:
     then:
       - text_sensor.template.publish:

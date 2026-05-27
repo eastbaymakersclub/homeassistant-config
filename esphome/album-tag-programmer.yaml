@@ -57,6 +57,38 @@ globals:
     initial_value: '""'
 
 script:
+  - id: blink_waiting_for_tag
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 120ms
+      - light.turn_off: activity_led
+
+  - id: blink_write_success
+    mode: restart
+    then:
+      - repeat:
+          count: 3
+          then:
+            - light.turn_on: activity_led
+            - delay: 100ms
+            - light.turn_off: activity_led
+            - delay: 120ms
+
+  - id: blink_writer_error
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 900ms
+      - light.turn_off: activity_led
+
+  - id: blink_writer_info
+    mode: restart
+    then:
+      - light.turn_on: activity_led
+      - delay: 250ms
+      - light.turn_off: activity_led
+
   - id: arm_pending_tag_write
     mode: restart
     then:
@@ -71,6 +103,7 @@ script:
             - text_sensor.template.publish:
                 id: writer_status
                 state: "Ready to write album tag"
+            - script.execute: blink_waiting_for_tag
           else:
             - light.turn_off: activity_led
 
@@ -125,7 +158,9 @@ interval:
                     - text_sensor.template.publish:
                         id: writer_status
                         state: "Album Cards API unreachable"
-                    - light.turn_off: activity_led
+                    - script.execute: blink_writer_error
+          else:
+            - script.execute: blink_waiting_for_tag
 
 pn532_i2c:
   id: pn532_board
@@ -156,27 +191,30 @@ pn532_i2c:
                           id(pending_tag_job_id).clear();
                           id(pending_tag_url).clear();
                           id(pending_url_sensor).publish_state("");
+                          id(blink_write_success).execute();
                         } else {
                           id(writer_status).publish_state("Could not confirm tag write");
+                          id(blink_writer_error).execute();
                         }
-                    - light.turn_off: activity_led
                 on_error:
                   then:
                     - text_sensor.template.publish:
                         id: writer_status
                         state: "Could not confirm tag write"
-                    - light.turn_off: activity_led
+                    - script.execute: blink_writer_error
   on_tag:
     then:
-      - light.turn_on: activity_led
       - lambda: |-
           id(current_tag_uid) = x;
           id(last_tag_uid).publish_state(x);
           if (id(pending_tag_job_id).empty()) {
             id(writer_status).publish_state("Saw tag; no queued album tag");
           }
-      - delay: 500ms
-      - light.turn_off: activity_led
+      - if:
+          condition:
+            lambda: "return id(pending_tag_job_id).empty();"
+          then:
+            - script.execute: blink_writer_info
 
 button:
   - platform: template
