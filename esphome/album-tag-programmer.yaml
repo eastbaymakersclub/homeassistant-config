@@ -61,6 +61,11 @@ globals:
     restore_value: no
     initial_value: '""'
 
+  - id: current_tag_url
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
 script:
   - id: blink_waiting_for_tag
     mode: restart
@@ -161,6 +166,8 @@ interval:
                     id(pending_url_sensor).publish_state(tag_url);
 
                     if (changed) {
+                      id(current_tag_uid).clear();
+                      id(current_tag_url).clear();
                       id(pending_tag_needs_arm) = true;
                       id(writer_status).publish_state("Active tag ready; place NFC tag");
                     }
@@ -221,9 +228,15 @@ pn532_i2c:
                   then:
                     - lambda: |-
                         if (response->status_code == 200) {
-                          id(writer_status).publish_state("Wrote album tag");
+                          id(writer_status).publish_state(
+                            id(current_tag_uid).empty()
+                              ? "Wrote album tag; retap to cache UID"
+                              : "Wrote album tag; cached UID"
+                          );
                           id(pending_tag_job_id).clear();
                           id(pending_tag_url).clear();
+                          id(current_tag_uid).clear();
+                          id(current_tag_url).clear();
                           id(pending_url_sensor).publish_state("");
                           id(blink_write_success).execute();
                         } else {
@@ -240,13 +253,65 @@ pn532_i2c:
     then:
       - lambda: |-
           id(current_tag_uid) = x;
+          id(current_tag_url).clear();
           id(last_tag_uid).publish_state(x);
+
+          if (tag.has_ndef_message()) {
+            auto message = tag.get_ndef_message();
+            auto records = message->get_records();
+            for (auto &record : records) {
+              std::string payload = record->get_payload();
+              size_t url_start = payload.find("https://");
+              if (url_start == std::string::npos) {
+                url_start = payload.find("http://");
+              }
+              if (url_start != std::string::npos) {
+                id(current_tag_url) = payload.substr(url_start);
+                break;
+              }
+            }
+          }
+
           if (id(pending_tag_job_id).empty()) {
-            id(writer_status).publish_state("Saw tag; no active album tag");
+            id(writer_status).publish_state(
+              id(current_tag_url).empty()
+                ? "Saw tag; no active album tag"
+                : "Saw album tag; caching UID"
+            );
           }
       - if:
           condition:
-            lambda: "return id(pending_tag_job_id).empty();"
+            lambda: "return id(pending_tag_job_id).empty() && !id(current_tag_url).empty();"
+          then:
+            - http_request.post:
+                url: ${album_cards_base_url}/api/hardware/tag-cache
+                request_headers:
+                  Content-Type: application/json
+                capture_response: true
+                max_response_buffer_size: 512
+                json: |-
+                  root["device"] = "${name}";
+                  root["tagUid"] = id(current_tag_uid);
+                  root["tagUrl"] = id(current_tag_url);
+                on_response:
+                  then:
+                    - lambda: |-
+                        if (response->status_code == 200) {
+                          id(writer_status).publish_state("Cached tag UID");
+                          id(blink_writer_info).execute();
+                        } else {
+                          id(writer_status).publish_state("Could not cache tag UID");
+                          id(blink_writer_error).execute();
+                        }
+                on_error:
+                  then:
+                    - text_sensor.template.publish:
+                        id: writer_status
+                        state: "Could not cache tag UID"
+                    - script.execute: blink_writer_error
+      - if:
+          condition:
+            lambda: "return id(pending_tag_job_id).empty() && id(current_tag_url).empty();"
           then:
             - script.execute: blink_writer_info
 
