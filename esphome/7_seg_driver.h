@@ -1,7 +1,19 @@
 #include "esphome.h"
 
+// Define your pins directly inside the C++ file
+const int CLK_PIN = 13;   // Clock
+const int LAT_PIN = 12;   // Latch
+const int SER_PIN = 14;   // Serial Data
+
 const int NUM_SEGMENTS = 6; 
 const int SHIFTER_DELAY_US = 25; 
+
+// Run this on boot to configure the pins
+inline void setupDisplayPins() {
+  pinMode(CLK_PIN, OUTPUT);
+  pinMode(LAT_PIN, OUTPUT);
+  pinMode(SER_PIN, OUTPUT);
+}
 
 inline uint8_t getSegmentPattern(char c) {
   c = toupper(c);
@@ -38,38 +50,35 @@ inline uint8_t getSegmentPattern(char c) {
 
 inline void slowShiftOut(uint8_t val) {
   for (int i = 0; i < 8; i++)  {
-    id(pin_ser).digital_write((val & (1 << (7 - i))) ? true : false);
+    digitalWrite(SER_PIN, (val & (1 << (7 - i))) ? HIGH : LOW);
     delayMicroseconds(SHIFTER_DELAY_US);
     
-    id(pin_clk).digital_write(true);
+    digitalWrite(CLK_PIN, HIGH);
     delayMicroseconds(SHIFTER_DELAY_US);
     
-    id(pin_clk).digital_write(false);
+    digitalWrite(CLK_PIN, LOW);
     delayMicroseconds(SHIFTER_DELAY_US);
   }
 }
 
 inline void writeStringToSegments(std::string text) {
-  // Pad left with spaces if string is too short
   while (text.length() < NUM_SEGMENTS) {
     text = " " + text; 
   }
-  // Truncate if too long
   if (text.length() > NUM_SEGMENTS) {
     text = text.substr(0, NUM_SEGMENTS);
   }
 
-  id(pin_lat).digital_write(false);
+  digitalWrite(LAT_PIN, LOW);
   delayMicroseconds(SHIFTER_DELAY_US);
 
-  // Shift out data from right to left
   for (int i = NUM_SEGMENTS - 1; i >= 0; i--) {
     char c = text[i];
     uint8_t pattern = getSegmentPattern(c);
     slowShiftOut(pattern);
   }
 
-  id(pin_lat).digital_write(true);
+  digitalWrite(LAT_PIN, HIGH);
   delayMicroseconds(SHIFTER_DELAY_US);
-  id(pin_lat).digital_write(false);
+  digitalWrite(LAT_PIN, LOW);
 }
