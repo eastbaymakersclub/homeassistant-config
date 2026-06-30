@@ -1,4 +1,5 @@
 #include "esphome.h"
+#include <Arduino.h>
 
 // Define your pins directly inside the C++ file
 const int CLK_PIN = 13;   // Clock
