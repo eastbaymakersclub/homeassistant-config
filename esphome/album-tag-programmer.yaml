@@ -5,7 +5,7 @@ substitutions:
   pn532_sda_pin: "23"
   pn532_scl_pin: "22"
   activity_led_pin: "13"
-  tag_verify_timeout_ms: "15000"
+  tag_verify_timeout_ms: "30000"
 
 esphome:
   name: ${name}
@@ -249,7 +249,7 @@ interval:
                 max_response_buffer_size: 512
                 json: |-
                   root["ok"] = false;
-                  root["error"] = "Timed out verifying tag readback";
+                  root["error"] = "Timed out waiting for verification retap";
                   if (!id(current_tag_url).empty()) {
                     root["tagUrl"] = id(current_tag_url);
                   }
@@ -260,7 +260,7 @@ interval:
                   then:
                     - lambda: |-
                         if (response->status_code == 200) {
-                          id(writer_status).publish_state("Tag write failed verification; try again");
+                          id(writer_status).publish_state("Tag write was not verified; write again");
                           id(pending_tag_job_id).clear();
                           id(pending_tag_url).clear();
                           id(pending_tag_verifying) = false;
@@ -295,7 +295,7 @@ pn532_i2c:
                 id(pending_tag_verify_started_at) = millis();
                 id(current_tag_uid).clear();
                 id(current_tag_url).clear();
-                id(writer_status).publish_state("Wrote album tag; keep tag in place to verify");
+                id(writer_status).publish_state("Wrote album tag; lift and retap to verify");
             - delay: 250ms
             - lambda: |-
                 id(pn532_board).read_mode();
