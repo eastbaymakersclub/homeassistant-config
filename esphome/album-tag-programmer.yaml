@@ -5,6 +5,7 @@ substitutions:
   pn532_sda_pin: "23"
   pn532_scl_pin: "22"
   activity_led_pin: "13"
+  tag_verify_timeout_ms: "15000"
 
 esphome:
   name: ${name}
@@ -55,6 +56,16 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
+
+  - id: pending_tag_verifying
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: pending_tag_verify_started_at
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
 
   - id: current_tag_uid
     type: std::string
@@ -107,6 +118,8 @@ script:
             lambda: "return !id(pending_tag_url).empty();"
           then:
             - lambda: |-
+                id(pending_tag_verifying) = false;
+                id(pending_tag_verify_started_at) = 0;
                 auto message = new nfc::NdefMessage();
                 message->add_uri_record(id(pending_tag_url));
                 id(pn532_board).write_mode(message);
@@ -116,6 +129,8 @@ script:
             - script.execute: blink_waiting_for_tag
           else:
             - lambda: |-
+                id(pending_tag_verifying) = false;
+                id(pending_tag_verify_started_at) = 0;
                 id(pn532_board).read_mode();
             - light.turn_off: activity_led
 
@@ -134,6 +149,10 @@ interval:
                   if (response->status_code != 200) {
                     id(pending_tag_job_id).clear();
                     id(pending_tag_url).clear();
+                    id(pending_tag_verifying) = false;
+                    id(pending_tag_verify_started_at) = 0;
+                    id(current_tag_uid).clear();
+                    id(current_tag_url).clear();
                     id(pending_url_sensor).publish_state("");
                     id(pending_tag_needs_arm) = true;
                     id(writer_status).publish_state("Could not fetch active tag");
@@ -146,6 +165,10 @@ interval:
                       if (!id(pending_tag_job_id).empty() || !id(pending_tag_url).empty()) {
                         id(pending_tag_job_id).clear();
                         id(pending_tag_url).clear();
+                        id(pending_tag_verifying) = false;
+                        id(pending_tag_verify_started_at) = 0;
+                        id(current_tag_uid).clear();
+                        id(current_tag_url).clear();
                         id(pending_url_sensor).publish_state("");
                         id(pending_tag_needs_arm) = true;
                         id(writer_status).publish_state("No active album tag");
@@ -168,6 +191,8 @@ interval:
                     if (changed) {
                       id(current_tag_uid).clear();
                       id(current_tag_url).clear();
+                      id(pending_tag_verifying) = false;
+                      id(pending_tag_verify_started_at) = 0;
                       id(pending_tag_needs_arm) = true;
                       id(writer_status).publish_state("Active tag ready; place NFC tag");
                     }
@@ -186,7 +211,7 @@ interval:
                   else:
                     - if:
                         condition:
-                          lambda: "return !id(pending_tag_job_id).empty();"
+                          lambda: "return !id(pending_tag_job_id).empty() && !id(pending_tag_verifying);"
                         then:
                           - script.execute: blink_waiting_for_tag
           on_error:
@@ -194,6 +219,10 @@ interval:
               - lambda: |-
                   id(pending_tag_job_id).clear();
                   id(pending_tag_url).clear();
+                  id(pending_tag_verifying) = false;
+                  id(pending_tag_verify_started_at) = 0;
+                  id(current_tag_uid).clear();
+                  id(current_tag_url).clear();
                   id(pending_url_sensor).publish_state("");
                   id(pending_tag_needs_arm) = true;
               - text_sensor.template.publish:
@@ -201,6 +230,56 @@ interval:
                   state: "Album Cards API unreachable"
               - script.execute: arm_pending_tag_write
               - script.execute: blink_writer_error
+
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(pending_tag_verifying) &&
+                !id(pending_tag_job_id).empty() &&
+                millis() - id(pending_tag_verify_started_at) > ${tag_verify_timeout_ms};
+          then:
+            - http_request.post:
+                url: !lambda |-
+                  return std::string("${album_cards_base_url}/api/hardware/tag-writes/") + id(pending_tag_job_id) + "/complete";
+                request_headers:
+                  Content-Type: application/json
+                capture_response: true
+                max_response_buffer_size: 512
+                json: |-
+                  root["ok"] = false;
+                  root["error"] = "Timed out verifying tag readback";
+                  if (!id(current_tag_url).empty()) {
+                    root["tagUrl"] = id(current_tag_url);
+                  }
+                  if (!id(current_tag_uid).empty()) {
+                    root["tagUid"] = id(current_tag_uid);
+                  }
+                on_response:
+                  then:
+                    - lambda: |-
+                        if (response->status_code == 200) {
+                          id(writer_status).publish_state("Tag write failed verification; try again");
+                          id(pending_tag_job_id).clear();
+                          id(pending_tag_url).clear();
+                          id(pending_tag_verifying) = false;
+                          id(pending_tag_verify_started_at) = 0;
+                          id(current_tag_uid).clear();
+                          id(current_tag_url).clear();
+                          id(pending_url_sensor).publish_state("");
+                          id(pn532_board).read_mode();
+                          id(blink_writer_error).execute();
+                        } else {
+                          id(writer_status).publish_state("Could not report verification failure");
+                          id(blink_writer_error).execute();
+                        }
+                on_error:
+                  then:
+                    - text_sensor.template.publish:
+                        id: writer_status
+                        state: "Could not report verification failure"
+                    - script.execute: blink_writer_error
 
 pn532_i2c:
   id: pn532_board
@@ -211,44 +290,16 @@ pn532_i2c:
           condition:
             lambda: "return !id(pending_tag_job_id).empty();"
           then:
-            - http_request.post:
-                url: !lambda |-
-                  return std::string("${album_cards_base_url}/api/hardware/tag-writes/") + id(pending_tag_job_id) + "/complete";
-                request_headers:
-                  Content-Type: application/json
-                capture_response: true
-                max_response_buffer_size: 512
-                json: |-
-                  root["ok"] = true;
-                  root["tagUrl"] = id(pending_tag_url);
-                  if (!id(current_tag_uid).empty()) {
-                    root["tagUid"] = id(current_tag_uid);
-                  }
-                on_response:
-                  then:
-                    - lambda: |-
-                        if (response->status_code == 200) {
-                          id(writer_status).publish_state(
-                            id(current_tag_uid).empty()
-                              ? "Wrote album tag; retap to cache UID"
-                              : "Wrote album tag; cached UID"
-                          );
-                          id(pending_tag_job_id).clear();
-                          id(pending_tag_url).clear();
-                          id(current_tag_uid).clear();
-                          id(current_tag_url).clear();
-                          id(pending_url_sensor).publish_state("");
-                          id(blink_write_success).execute();
-                        } else {
-                          id(writer_status).publish_state("Could not confirm tag write");
-                          id(blink_writer_error).execute();
-                        }
-                on_error:
-                  then:
-                    - text_sensor.template.publish:
-                        id: writer_status
-                        state: "Could not confirm tag write"
-                    - script.execute: blink_writer_error
+            - lambda: |-
+                id(pending_tag_verifying) = true;
+                id(pending_tag_verify_started_at) = millis();
+                id(current_tag_uid).clear();
+                id(current_tag_url).clear();
+                id(writer_status).publish_state("Wrote album tag; keep tag in place to verify");
+            - delay: 250ms
+            - lambda: |-
+                id(pn532_board).read_mode();
+            - script.execute: blink_writer_info
   on_tag:
     then:
       - lambda: |-
@@ -272,13 +323,62 @@ pn532_i2c:
             }
           }
 
-          if (id(pending_tag_job_id).empty()) {
+          if (!id(pending_tag_job_id).empty() && id(pending_tag_verifying)) {
+            if (id(current_tag_url) == id(pending_tag_url)) {
+              id(writer_status).publish_state("Verified album tag");
+            } else if (id(current_tag_url).empty()) {
+              id(writer_status).publish_state("Verification failed: no album URL read");
+              id(blink_writer_error).execute();
+            } else {
+              id(writer_status).publish_state("Verification failed: read different URL");
+              id(blink_writer_error).execute();
+            }
+          } else if (id(pending_tag_job_id).empty()) {
             id(writer_status).publish_state(
               id(current_tag_url).empty()
                 ? "Saw tag; no active album tag"
                 : "Saw album tag; caching UID"
             );
           }
+      - if:
+          condition:
+            lambda: "return id(pending_tag_verifying) && !id(pending_tag_job_id).empty() && id(current_tag_url) == id(pending_tag_url);"
+          then:
+            - http_request.post:
+                url: !lambda |-
+                  return std::string("${album_cards_base_url}/api/hardware/tag-writes/") + id(pending_tag_job_id) + "/complete";
+                request_headers:
+                  Content-Type: application/json
+                capture_response: true
+                max_response_buffer_size: 512
+                json: |-
+                  root["ok"] = true;
+                  root["tagUrl"] = id(pending_tag_url);
+                  root["tagUid"] = id(current_tag_uid);
+                on_response:
+                  then:
+                    - lambda: |-
+                        if (response->status_code == 200) {
+                          id(writer_status).publish_state("Verified album tag; cached UID");
+                          id(pending_tag_job_id).clear();
+                          id(pending_tag_url).clear();
+                          id(pending_tag_verifying) = false;
+                          id(pending_tag_verify_started_at) = 0;
+                          id(current_tag_uid).clear();
+                          id(current_tag_url).clear();
+                          id(pending_url_sensor).publish_state("");
+                          id(pn532_board).read_mode();
+                          id(blink_write_success).execute();
+                        } else {
+                          id(writer_status).publish_state("Could not confirm verified tag write");
+                          id(blink_writer_error).execute();
+                        }
+                on_error:
+                  then:
+                    - text_sensor.template.publish:
+                        id: writer_status
+                        state: "Could not confirm verified tag write"
+                    - script.execute: blink_writer_error
       - if:
           condition:
             lambda: "return id(pending_tag_job_id).empty() && !id(current_tag_url).empty();"
@@ -325,6 +425,10 @@ button:
         - lambda: |-
             id(pending_tag_job_id).clear();
             id(pending_tag_url).clear();
+            id(pending_tag_verifying) = false;
+            id(pending_tag_verify_started_at) = 0;
+            id(current_tag_uid).clear();
+            id(current_tag_url).clear();
             id(pn532_board).read_mode();
         - text_sensor.template.publish:
             id: writer_status
